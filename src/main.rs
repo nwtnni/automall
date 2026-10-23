@@ -1,12 +1,12 @@
-use core::marker::PhantomData;
+use core::fmt::Display;
 use std::collections::HashSet;
 use std::fs::File;
 use std::io::BufReader;
 use std::io::Read;
+use std::io::Write as _;
 
 use petgraph::prelude::DiGraphMap;
 use serde::Deserialize;
-use serde_json::Value;
 
 use automall::deserialize_empty_vec;
 use automall::deserialize_item_map;
@@ -40,6 +40,9 @@ fn main() {
                 .iter()
                 .any(|category| categories.contains(category))
         })
+        .filter(|(name, _)| !name.contains("methanol-gas"))
+        .filter(|(name, _)| !name.contains("cage"))
+        .filter(|(name, _)| !name.contains("barrel"))
         .flat_map(|(_, recipe)| {
             recipe.ingredients.iter().flat_map(|ingredient| {
                 recipe
@@ -48,10 +51,30 @@ fn main() {
                     .map(|result| (ingredient.name, result.name))
             })
         })
-        .map(|(ingredient, result)| (ingredient, result, ()))
+        .map(|(ingredient, result)| (ingredient, result, Empty))
         .collect::<DiGraphMap<_, _>>();
 
-    println!("{} nodes, {} edges", graph.node_count(), graph.edge_count());
+    // println!("{}", petgraph::dot::Dot::new(&graph));
+
+    // use graph_cycles::Cycles;
+    // let cycles = graph.cycles();
+    // println!("{:?}", cycles);
+
+    let mut stdout = std::io::stdout().lock();
+    petgraph::algo::toposort(&graph, None)
+        .unwrap()
+        .iter()
+        .enumerate()
+        .for_each(|(index, name)| writeln!(&mut stdout, "{},{}", index, name).unwrap());
+}
+
+#[derive(Debug)]
+struct Empty;
+
+impl Display for Empty {
+    fn fmt(&self, _: &mut core::fmt::Formatter<'_>) -> std::fmt::Result {
+        Ok(())
+    }
 }
 
 #[derive(Debug, Deserialize)]
