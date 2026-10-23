@@ -80,7 +80,7 @@ where
     where
         M: MapAccess<'de>,
     {
-        let None = dbg!(access.next_entry::<&'de str, T>())? else {
+        let None = access.next_entry::<&'de str, T>()? else {
             return Err(M::Error::custom("expected empty map"));
         };
         Ok(Vec::new())
@@ -91,14 +91,14 @@ where
         A: SeqAccess<'de>,
     {
         let mut buffer = Vec::with_capacity(seq.size_hint().unwrap_or(0));
-        while let Some(item) = dbg!(seq.next_element::<T>())? {
+        while let Some(item) = seq.next_element::<T>()? {
             buffer.push(item);
         }
         Ok(buffer)
     }
 }
 
-pub fn deserialize_weird_vec<'de, D, T>(deserializer: D) -> Result<Vec<T>, D::Error>
+pub fn deserialize_empty_vec<'de, D, T>(deserializer: D) -> Result<Vec<T>, D::Error>
 where
     D: Deserializer<'de>,
     T: Deserialize<'de> + Debug,
