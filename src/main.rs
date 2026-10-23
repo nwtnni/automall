@@ -31,17 +31,27 @@ fn main() {
         .copied()
         .collect::<HashSet<&str>>();
 
-    println!("{:?}", categories);
+    let graph = data
+        .recipes
+        .iter()
+        .filter(|(_, recipe)| {
+            recipe
+                .categories
+                .iter()
+                .any(|category| categories.contains(category))
+        })
+        .flat_map(|(_, recipe)| {
+            recipe.ingredients.iter().flat_map(|ingredient| {
+                recipe
+                    .results
+                    .iter()
+                    .map(|result| (ingredient.name, result.name))
+            })
+        })
+        .map(|(ingredient, result)| (ingredient, result, ()))
+        .collect::<DiGraphMap<_, _>>();
 
-    // let mut graph = DiGraphMap::<&str, ()>::new();
-    // 'outer: for (name, recipe) in &data.recipes {
-    //     for ingredient in recipe.ingredients {
-    //         match ingredient.r#type {
-    //             Type::Fluid => continue 'outer,
-    //         }
-    //         graph.add_edge()
-    //     }
-    // }
+    println!("{} nodes, {} edges", graph.node_count(), graph.edge_count());
 }
 
 #[derive(Debug, Deserialize)]
@@ -68,8 +78,12 @@ struct Machine<'a> {
 struct Recipe<'a> {
     #[serde(borrow, default)]
     categories: Vec<&'a str>,
+
     #[serde(borrow, deserialize_with = "deserialize_empty_vec")]
     ingredients: Vec<Ingredient<'a>>,
+
+    #[serde(borrow, deserialize_with = "deserialize_empty_vec")]
+    results: Vec<Ingredient<'a>>,
 }
 
 #[derive(Debug, Deserialize)]
