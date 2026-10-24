@@ -5,6 +5,7 @@ use std::io::BufReader;
 use std::io::Read;
 use std::io::Write as _;
 
+use automall::blueprint::BlueprintString;
 use petgraph::prelude::DiGraphMap;
 use serde::Deserialize;
 
@@ -13,6 +14,13 @@ use automall::deserialize_item_map;
 
 fn main() {
     let path = std::env::args().nth(1).unwrap();
+
+    if path.starts_with("0") {
+        let blueprint = BlueprintString::decode(&path);
+        println!("{:?}", blueprint);
+        return;
+    }
+
     let mut buffer = Vec::new();
     File::open(path)
         .map(BufReader::new)
@@ -34,15 +42,21 @@ fn main() {
     let graph = data
         .recipes
         .iter()
+        .filter(|(name, _)| !name.contains("cage"))
+        .filter(|(name, _)| !name.contains("barrel"))
         .filter(|(_, recipe)| {
             recipe
                 .categories
                 .iter()
                 .any(|category| categories.contains(category))
         })
-        .filter(|(name, _)| !name.contains("methanol-gas"))
-        .filter(|(name, _)| !name.contains("cage"))
-        .filter(|(name, _)| !name.contains("barrel"))
+        .filter(|(_, recipe)| {
+            recipe
+                .ingredients
+                .iter()
+                .chain(&recipe.results)
+                .all(|item| matches!(item.r#type, Type::Item))
+        })
         .flat_map(|(_, recipe)| {
             recipe.ingredients.iter().flat_map(|ingredient| {
                 recipe
@@ -60,12 +74,20 @@ fn main() {
     // let cycles = graph.cycles();
     // println!("{:?}", cycles);
 
-    let mut stdout = std::io::stdout().lock();
-    petgraph::algo::toposort(&graph, None)
-        .unwrap()
-        .iter()
-        .enumerate()
-        .for_each(|(index, name)| writeln!(&mut stdout, "{},{}", index, name).unwrap());
+    let blueprint = BlueprintString::constant_combinator(
+        String::from("Topological Sort"),
+        petgraph::algo::toposort(&graph, None)
+            .unwrap()
+            .iter()
+            .copied()
+            .enumerate()
+            .map(|(index, name)| (String::from(name), index as i32)),
+    )
+    .encode();
+
+    std::io::stdout().lock().write_all(&blueprint).unwrap();
+
+    // .for_each(|(index, name)| writeln!(&mut stdout, "{},{}", index, name).unwrap());
 }
 
 #[derive(Debug)]

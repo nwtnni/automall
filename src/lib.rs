@@ -2,6 +2,8 @@
 // Posted by Stargateur, modified by community. See post 'Timeline' for change history
 // Retrieved 2026-10-23, License - CC BY-SA 4.0
 
+pub mod blueprint;
+
 use core::fmt;
 use core::fmt::Debug;
 use core::marker::PhantomData;
