@@ -39,40 +39,70 @@ fn main() {
         .copied()
         .collect::<HashSet<&str>>();
 
+    let mut craftable = HashSet::new();
+
     let graph = data
         .recipes
         .iter()
+        // methanol <-> methanol-gas-canister <-> empty-gas-canister
+        .filter(|(name, _)| !name.contains("canister"))
         .filter(|(name, _)| !name.contains("cage"))
         .filter(|(name, _)| !name.contains("barrel"))
+        // nuclear-reactor <-> nuclear-reactor-mox
+        .filter(|(name, _)| !name.ends_with("uncraft"))
+        // auog-paddock-mk01-with-dirt
+        .filter(|(name, _)| !name.ends_with("with-dirt"))
         .filter(|(_, recipe)| {
+            assert!(recipe.categories.len() <= 1);
             recipe
                 .categories
-                .iter()
-                .any(|category| categories.contains(category))
+                .first()
+                .is_none_or(|category| categories.contains(category))
         })
-        .filter(|(_, recipe)| {
-            recipe
-                .ingredients
-                .iter()
-                .chain(&recipe.results)
-                .all(|item| matches!(item.r#type, Type::Item))
-        })
+        // .filter(|(_, recipe)| {
+        //     recipe
+        //         .ingredients
+        //         .iter()
+        //         .chain(&recipe.results)
+        //         .all(|item| matches!(item.r#type, Type::Item))
+        // })
+        // .inspect(|(name, recipe)| {
+        //     if recipe
+        //         .results
+        //         .iter()
+        //         .any(|item| item.name == "proton-donor")
+        //     {
+        //         eprintln!("{name}: {recipe:?}");
+        //     }
+        // })
         .flat_map(|(_, recipe)| {
-            recipe.ingredients.iter().flat_map(|ingredient| {
+            craftable.extend(recipe.results.iter().map(|result| result.name));
+
+            recipe.results.iter().flat_map(|result| {
                 recipe
-                    .results
+                    .ingredients
                     .iter()
-                    .map(|result| (ingredient.name, result.name))
+                    .map(|ingredient| (ingredient.name, result.name))
+                    .filter(|(ingredient, result)| {
+                        *ingredient != "small-lamp" && *result != "small-lamp"
+                    })
             })
         })
         .map(|(ingredient, result)| (ingredient, result, Empty))
+        // .map(|(ingredient, result)| {
+        //     (
+        //         &*ingredient.to_owned().leak(),
+        //         &*result.to_owned().leak(),
+        //         Empty,
+        //     )
+        // })
         .collect::<DiGraphMap<_, _>>();
 
     // println!("{}", petgraph::dot::Dot::new(&graph));
 
     // use graph_cycles::Cycles;
     // let cycles = graph.cycles();
-    // println!("{:?}", cycles);
+    // eprintln!("{:?}", cycles);
 
     let blueprint = BlueprintString::constant_combinator(
         String::from("Topological Sort"),
@@ -80,14 +110,14 @@ fn main() {
             .unwrap()
             .iter()
             .copied()
+            .filter(|name| craftable.contains(name))
             .enumerate()
+            // .inspect(|(index, name)| eprintln!("{index}: {name}"))
             .map(|(index, name)| (String::from(name), index as i32)),
     )
     .encode();
 
     std::io::stdout().lock().write_all(&blueprint).unwrap();
-
-    // .for_each(|(index, name)| writeln!(&mut stdout, "{},{}", index, name).unwrap());
 }
 
 #[derive(Debug)]
