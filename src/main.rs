@@ -19,7 +19,7 @@ use automall::deserialize_item_map;
 enum Cli {
     Encode {
         #[clap(short, long)]
-        time: bool,
+        mode: Mode,
 
         #[clap(short, long)]
         blueprint: bool,
@@ -30,11 +30,14 @@ enum Cli {
         #[clap(long, default_value_t = 2.5)]
         insert_rate: f32,
 
+        #[clap(long, default_value_t = 1)]
+        insert_hand: u16,
+
         #[clap(long, default_value_t = 24)]
-        insert_high: usize,
+        insert_high: u16,
 
         #[clap(long, default_value_t = 12)]
-        insert_low: usize,
+        insert_low: u16,
 
         /// Path to data-raw-dump.json.gz
         ///
@@ -46,6 +49,12 @@ enum Cli {
     },
 }
 
+#[derive(Copy, Clone, clap::ValueEnum)]
+enum Mode {
+    Priority,
+    Time,
+}
+
 fn main() {
     match Cli::parse() {
         Cli::Decode { blueprint } => {
@@ -53,11 +62,12 @@ fn main() {
             println!("{:?}", blueprint);
         }
         Cli::Encode {
-            time,
+            mode,
             blueprint,
             data,
             craft_rate,
             insert_rate,
+            insert_hand,
             insert_high,
             insert_low,
         } => {
@@ -111,24 +121,61 @@ fn main() {
                         .first()
                         .is_none_or(|category| categories.contains(category))
                 })
-                .flat_map(|(name, recipe)| {
+                .inspect(|(name, recipe)| {
+                    if recipe
+                        .results
+                        .iter()
+                        .any(|result| matches!(result.r#type, Type::Fluid))
+                    {
+                        return;
+                    }
+
+                    let Some(insert_time) =
+                        recipe.ingredients.iter().try_fold(0.0, |time, ingredient| {
+                            let Ingredient::Item { amount, .. } = ingredient else {
+                                return None;
+                            };
+
+                            Some(
+                                time + insert_time(
+                                    insert_rate,
+                                    insert_hand,
+                                    insert_high,
+                                    insert_low,
+                                    *amount,
+                                ),
+                            )
+                        })
+                    else {
+                        return;
+                    };
+
                     assert!(
                         recipe.main_product.is_some() || recipe.results.len() == 1,
                         "{name}: {recipe:?}"
                     );
+                    let main_index = recipe
+                        .main_product
+                        .and_then(|name| {
+                            recipe.results.iter().position(|result| result.name == name)
+                        })
+                        .unwrap_or(0);
+                    let main_result = &recipe.results[main_index];
 
-                    craftable.insert(
-                        recipe
-                            .main_product
-                            .unwrap_or_else(|| recipe.results[0].name),
-                        recipe.energy_required,
-                    );
+                    assert_eq!(main_result.extra_count_fraction, 0.0, "{name}: {recipe:?}");
+                    assert_eq!(main_result.probability.average(), 1.0);
 
+                    let craft_time =
+                        recipe.energy_required * 60.0 / craft_rate / main_result.amount.average();
+
+                    craftable.insert(main_result.name, craft_time + insert_time);
+                })
+                .flat_map(|(_, recipe)| {
                     recipe.results.iter().flat_map(|result| {
                         recipe
                             .ingredients
                             .iter()
-                            .map(|ingredient| (ingredient.name, result.name))
+                            .map(|ingredient| (ingredient.name(), result.name))
                     })
                 })
                 .map(|(ingredient, result)| (ingredient, result, Empty))
@@ -147,20 +194,23 @@ fn main() {
             // let cycles = graph.cycles();
             // eprintln!("{:?}", cycles);
 
-            let sorted = petgraph::algo::toposort(&graph, None).unwrap();
-            let signals = sorted.iter().copied();
-
-            let signals = if time {
-                Box::new(signals.filter_map(|name| {
-                    craftable.get(name).map(|time| (name, (time * 60.0) as i32))
-                })) as Box<dyn Iterator<Item = _>>
-            } else {
-                Box::new(
-                    signals
-                        .filter(|name| craftable.contains_key(name))
+            let signals = match mode {
+                Mode::Time => {
+                    let mut sorted = craftable
+                        .into_iter()
+                        .map(|(name, time)| (name, time as i32))
+                        .collect::<Vec<_>>();
+                    sorted.sort_unstable_by_key(|(_, time)| *time);
+                    Box::new(sorted.into_iter()) as Box<dyn Iterator<Item = _>>
+                }
+                Mode::Priority => Box::new(
+                    petgraph::algo::toposort(&graph, None)
+                        .unwrap()
+                        .into_iter()
+                        .filter(move |name| craftable.contains_key(name))
                         .enumerate()
                         .map(|(index, name)| (name, index as i32)),
-                )
+                ),
             };
 
             if blueprint {
@@ -175,6 +225,29 @@ fn main() {
             }
         }
     }
+}
+
+fn insert_time(
+    insert_rate: f32,
+    insert_hand: u16,
+    insert_high: u16,
+    insert_low: u16,
+    mut amount: u16,
+) -> f32 {
+    let mut total = 0.0;
+
+    if let Some(high) = amount.checked_sub(insert_high) {
+        amount -= high;
+        total += high.div_ceil(insert_hand) as f32 * 60.0 / insert_rate / 12.0;
+    }
+
+    if let Some(low) = amount.checked_sub(insert_low) {
+        amount -= low;
+        total += low.div_ceil(insert_hand) as f32 * 60.0 / insert_rate / 6.0;
+    }
+
+    total += amount as f32 * 60.0 / insert_rate / 2.0;
+    total
 }
 
 #[derive(Debug)]
@@ -244,22 +317,97 @@ struct Recipe<'a> {
     ingredients: Vec<Ingredient<'a>>,
 
     #[serde(borrow, deserialize_with = "deserialize_empty_vec")]
-    results: Vec<Ingredient<'a>>,
+    results: Vec<Result<'a>>,
 }
 
 #[derive(Debug, Deserialize)]
-struct Ingredient<'a> {
+#[serde(tag = "type", rename_all = "lowercase")]
+enum Ingredient<'a> {
+    Item { name: &'a str, amount: u16 },
+    Fluid { name: &'a str },
+}
+
+impl<'a> Ingredient<'a> {
+    fn name(&self) -> &'a str {
+        match self {
+            Self::Item { name, .. } | Self::Fluid { name } => name,
+        }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+struct Result<'a> {
     r#type: Type,
     name: &'a str,
+
+    #[serde(flatten)]
+    amount: Amount,
+
+    #[serde(flatten)]
+    probability: Probability,
+
+    #[serde(default)]
+    extra_count_fraction: f32,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Copy, Clone, Debug, Deserialize)]
 #[serde(rename_all = "lowercase")]
 enum Type {
     Item,
     Fluid,
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+enum Amount {
+    Fixed { amount: f32 },
+    Uniform { amount_min: f32, amount_max: f32 },
+}
+
+impl Amount {
+    fn average(&self) -> f32 {
+        match self {
+            Self::Fixed { amount } => *amount,
+            Self::Uniform {
+                amount_min,
+                amount_max,
+            } => amount_min + amount_max.max(*amount_min) / 2.0,
+        }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+struct Probability {
+    #[serde(default = "default_1")]
+    independent_probability: f64,
+
+    #[serde(default)]
+    shared_probability: SharedProbability,
+}
+
+impl Probability {
+    fn average(&self) -> f64 {
+        self.independent_probability * (self.shared_probability.max - self.shared_probability.min)
+    }
+}
+
+#[derive(Debug, Deserialize)]
+struct SharedProbability {
+    min: f64,
+    #[serde(default = "default_1")]
+    max: f64,
+}
+
+impl Default for SharedProbability {
+    fn default() -> Self {
+        Self { min: 0.0, max: 1.0 }
+    }
+}
+
 const fn default_true() -> bool {
     true
+}
+
+const fn default_1() -> f64 {
+    1.0
 }
