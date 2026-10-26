@@ -203,14 +203,45 @@ fn main() {
                     sorted.sort_unstable_by_key(|(_, time)| *time);
                     Box::new(sorted.into_iter()) as Box<dyn Iterator<Item = _>>
                 }
-                Mode::Priority => Box::new(
-                    petgraph::algo::toposort(&graph, None)
-                        .unwrap()
-                        .into_iter()
-                        .filter(move |name| craftable.contains_key(name))
-                        .enumerate()
-                        .map(|(index, name)| (name, index as i32)),
-                ),
+                Mode::Priority => {
+                    let mut stack = graph
+                        .nodes()
+                        .filter(|node| {
+                            graph
+                                .neighbors_directed(node, petgraph::Direction::Incoming)
+                                .count()
+                                == 0
+                        })
+                        .collect::<Vec<_>>();
+
+                    let mut depths = stack
+                        .iter()
+                        .map(|node| (*node, 0))
+                        .collect::<HashMap<_, _>>();
+
+                    while let Some(input) = stack.pop() {
+                        let input_depth = depths[input];
+                        for output in graph.neighbors_directed(input, petgraph::Direction::Outgoing)
+                        {
+                            let output_depth = depths.entry(output).or_insert(0);
+                            if *output_depth > input_depth {
+                                continue;
+                            }
+
+                            *output_depth = input_depth + 1;
+                            stack.push(output);
+                        }
+                    }
+
+                    let mut depths = depths.into_iter().collect::<Vec<_>>();
+                    depths.sort_by_key(|(_, depth)| *depth);
+
+                    Box::new(
+                        depths
+                            .into_iter()
+                            .filter(move |(name, _)| craftable.contains_key(name)),
+                    )
+                }
             };
 
             if blueprint {
