@@ -165,10 +165,12 @@ fn main() {
                     assert_eq!(main_result.extra_count_fraction, 0.0, "{name}: {recipe:?}");
                     assert_eq!(main_result.probability.average(), 1.0);
 
-                    let craft_time =
-                        recipe.energy_required * 60.0 / craft_rate / main_result.amount.average();
+                    let craft_time = recipe.energy_required * 60.0 / craft_rate;
 
-                    craftable.insert(main_result.name, craft_time + insert_time);
+                    craftable.insert(
+                        main_result.name,
+                        (craft_time + insert_time) / main_result.amount.average(),
+                    );
                 })
                 .flat_map(|(_, recipe)| {
                     recipe.results.iter().flat_map(|result| {
