@@ -254,7 +254,7 @@ fn main() {
                 .encode();
                 std::io::stdout().lock().write_all(&blueprint).unwrap();
             } else {
-                signals.for_each(|(index, name)| println!("{index}: {name}"))
+                signals.for_each(|(name, index)| println!("{name}: {index}"))
             }
         }
     }
