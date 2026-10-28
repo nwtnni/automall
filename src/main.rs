@@ -40,7 +40,7 @@ enum Cli {
 
 #[derive(Copy, Clone, clap::ValueEnum)]
 enum Mode {
-    Priority,
+    Depth,
     CraftTime,
     InputCount,
 }
@@ -231,7 +231,7 @@ fn main() {
                             .map(|name| {
                                 let io = &craftable[name];
                                 let io = match mode {
-                                    Mode::Priority => unreachable!(),
+                                    Mode::Depth => unreachable!(),
                                     Mode::CraftTime => io.craft_time,
                                     Mode::InputCount => io.input_count,
                                 };
@@ -257,7 +257,7 @@ fn main() {
                         }
                     })
                     .collect(),
-                Mode::Priority => item_by_depth
+                Mode::Depth => item_by_depth
                     .into_iter()
                     .enumerate()
                     .skip(1)
