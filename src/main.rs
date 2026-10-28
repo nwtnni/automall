@@ -49,7 +49,7 @@ fn main() {
     match Cli::parse() {
         Cli::Decode { blueprint } => {
             BlueprintString::with_decode(&blueprint, |blueprint| {
-                println!("{:?}", blueprint);
+                println!("{:#?}", blueprint);
             });
         }
         Cli::Encode {

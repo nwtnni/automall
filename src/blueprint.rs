@@ -21,7 +21,7 @@ impl<'a> BlueprintString<'a> {
                 entities: vec![Entity {
                     entity_number: 1,
                     name: "constant-combinator",
-                    position: Position { x: 0.0, y: 0.0 },
+                    position: Position { x: 0.5, y: 0.5 },
                     control_behavior: Some(ControlBehavior {
                         sections: Some(LogisticSections { sections }),
                     }),
@@ -104,6 +104,7 @@ pub struct LogisticSection<'a> {
     pub index: NonZeroU8,
     #[serde(borrow)]
     pub filters: Vec<LogisticFilter<'a>>,
+    #[serde(default = "default_1")]
     pub multiplier: f32,
 }
 
@@ -119,4 +120,8 @@ pub struct LogisticFilter<'a> {
 pub struct Position {
     x: f32,
     y: f32,
+}
+
+fn default_1() -> f32 {
+    1.0
 }
