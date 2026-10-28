@@ -102,6 +102,8 @@ pub struct LogisticSection<'a> {
     pub index: NonZeroU8,
     #[serde(borrow)]
     pub filters: Vec<LogisticFilter<'a>>,
+    #[serde(borrow, skip_serializing_if = "Option::is_none")]
+    pub group: Option<&'a str>,
     #[serde(default = "default_1")]
     pub multiplier: f32,
 }

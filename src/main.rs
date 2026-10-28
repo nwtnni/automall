@@ -224,6 +224,9 @@ fn main() {
                 item_by_depth[depth].push(name);
             }
             assert!(item_by_depth[0].is_empty(), "Can't craft depth 0 items");
+            let group_names = (0..max_depth + 1)
+                .map(|depth| format!("Automall Depth {depth:02}"))
+                .collect::<Vec<_>>();
 
             let sections = match mode {
                 mode @ (Mode::CraftTime | Mode::InputCount) => item_by_depth
@@ -258,6 +261,7 @@ fn main() {
                         LogisticSection {
                             index: NonZeroU8::new(index as u8).unwrap(),
                             multiplier: 1.0,
+                            group: None,
                             filters,
                         }
                     })
@@ -285,6 +289,7 @@ fn main() {
                         LogisticSection {
                             index: NonZeroU8::new(index as u8).unwrap(),
                             multiplier: index as f32,
+                            group: Some(&group_names[index]),
                             filters,
                         }
                     })
