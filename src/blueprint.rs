@@ -1,40 +1,29 @@
 //! https://wiki.factorio.com/Blueprint_string_format
 
-use core::num::NonZeroUsize;
+use core::num::NonZeroU8;
+use core::num::NonZeroU16;
+use std::io::Read as _;
 
 use serde::Deserialize;
 use serde::Serialize;
 
 #[derive(Debug, Deserialize, Serialize)]
-pub struct BlueprintString {
-    blueprint: Blueprint,
+pub struct BlueprintString<'a> {
+    #[serde(borrow)]
+    blueprint: Blueprint<'a>,
 }
 
-impl BlueprintString {
-    pub fn constant_combinator(
-        label: String,
-        signals: impl IntoIterator<Item = (String, i32)>,
-    ) -> Self {
+impl<'a> BlueprintString<'a> {
+    pub fn constant_combinator(label: &'a str, sections: Vec<LogisticSection<'a>>) -> Self {
         Self {
             blueprint: Blueprint {
                 label,
                 entities: vec![Entity {
                     entity_number: 1,
-                    name: String::from("constant-combinator"),
+                    name: "constant-combinator",
                     position: Position { x: 0.0, y: 0.0 },
                     control_behavior: Some(ControlBehavior {
-                        filters: signals
-                            .into_iter()
-                            .enumerate()
-                            .map(|(index, (name, count))| Filter {
-                                signal: Signal {
-                                    r#type: String::from("item"),
-                                    name,
-                                },
-                                index: NonZeroUsize::new(index + 1).unwrap(),
-                                count,
-                            })
-                            .collect(),
+                        sections: Some(LogisticSections { sections }),
                     }),
                 }],
                 version: 0,
@@ -59,55 +48,71 @@ impl BlueprintString {
     }
 
     // Tested on https://factorioprints.com/view/-Kl-a5-7hM9UdJQEYzjU
-    pub fn decode(string: &str) -> Self {
+    pub fn with_decode<F, T>(string: &'a str, with: F) -> T
+    where
+        for<'b> F: FnOnce(BlueprintString<'b>) -> T,
+    {
         assert_eq!(string.as_bytes()[0], b'0');
-        serde_json::de::from_reader(flate2::read::ZlibDecoder::new(
-            base64::read::DecoderReader::new(
-                &string.as_bytes()[1..],
-                &base64::engine::general_purpose::STANDARD,
-            ),
+
+        let mut buffer = String::new();
+        flate2::read::ZlibDecoder::new(base64::read::DecoderReader::new(
+            &string.as_bytes()[1..],
+            &base64::engine::general_purpose::STANDARD,
         ))
-        .unwrap()
+        .read_to_string(&mut buffer)
+        .unwrap();
+        let blueprint = serde_json::de::from_str(&buffer).unwrap();
+        with(blueprint)
     }
 }
 
 /// https://wiki.factorio.com/Blueprint_string_format#Blueprint_object
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(tag = "item", rename = "blueprint")]
-pub struct Blueprint {
-    label: String,
-    entities: Vec<Entity>,
+pub struct Blueprint<'a> {
+    label: &'a str,
+    #[serde(borrow)]
+    entities: Vec<Entity<'a>>,
     version: u64,
 }
 
 /// https://wiki.factorio.com/Blueprint_string_format#Entity_object
 #[derive(Debug, Deserialize, Serialize)]
-pub struct Entity {
+pub struct Entity<'a> {
     entity_number: usize,
-    name: String,
+    name: &'a str,
     position: Position,
-    control_behavior: Option<ControlBehavior>,
+    #[serde(borrow)]
+    control_behavior: Option<ControlBehavior<'a>>,
 }
 
 /// https://wiki.factorio.com/Blueprint_string_format#Control_behavior_object
 #[derive(Debug, Deserialize, Serialize)]
-pub struct ControlBehavior {
-    #[serde(default)]
-    filters: Vec<Filter>,
+pub struct ControlBehavior<'a> {
+    #[serde(borrow)]
+    sections: Option<LogisticSections<'a>>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct LogisticSections<'a> {
+    #[serde(borrow)]
+    sections: Vec<LogisticSection<'a>>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct LogisticSection<'a> {
+    pub index: NonZeroU8,
+    #[serde(borrow)]
+    pub filters: Vec<LogisticFilter<'a>>,
+    pub multiplier: f32,
 }
 
 /// https://wiki.factorio.com/Blueprint_string_format#Logistic_filter_object
 #[derive(Debug, Deserialize, Serialize)]
-pub struct Filter {
-    signal: Signal,
-    index: NonZeroUsize,
-    count: i32,
-}
-
-#[derive(Debug, Deserialize, Serialize)]
-pub struct Signal {
-    r#type: String,
-    name: String,
+pub struct LogisticFilter<'a> {
+    pub index: NonZeroU16,
+    pub name: &'a str,
+    pub count: i32,
 }
 
 #[derive(Debug, Deserialize, Serialize)]

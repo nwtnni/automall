@@ -1,4 +1,6 @@
 use core::fmt::Display;
+use core::num::NonZeroU8;
+use core::num::NonZeroU16;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::fs::File;
@@ -8,6 +10,8 @@ use std::io::Write as _;
 use std::path::PathBuf;
 
 use automall::blueprint::BlueprintString;
+use automall::blueprint::LogisticFilter;
+use automall::blueprint::LogisticSection;
 use clap::Parser as _;
 use petgraph::prelude::DiGraphMap;
 use serde::Deserialize;
@@ -58,8 +62,9 @@ enum Mode {
 fn main() {
     match Cli::parse() {
         Cli::Decode { blueprint } => {
-            let blueprint = BlueprintString::decode(&blueprint);
-            println!("{:?}", blueprint);
+            BlueprintString::with_decode(&blueprint, |blueprint| {
+                println!("{:?}", blueprint);
+            });
         }
         Cli::Encode {
             mode,
@@ -196,65 +201,116 @@ fn main() {
             // let cycles = graph.cycles();
             // eprintln!("{:?}", cycles);
 
-            let signals = match mode {
-                Mode::Time => {
-                    let mut sorted = craftable
-                        .into_iter()
-                        .map(|(name, time)| (name, time as i32))
-                        .collect::<Vec<_>>();
-                    sorted.sort_unstable_by_key(|(_, time)| *time);
-                    Box::new(sorted.into_iter()) as Box<dyn Iterator<Item = _>>
-                }
-                Mode::Priority => {
-                    let mut stack = graph
-                        .nodes()
-                        .filter(|node| {
-                            graph
-                                .neighbors_directed(node, petgraph::Direction::Incoming)
-                                .count()
-                                == 0
-                        })
-                        .collect::<Vec<_>>();
+            let mut stack = graph
+                .nodes()
+                .filter(|node| {
+                    graph
+                        .neighbors_directed(node, petgraph::Direction::Incoming)
+                        .count()
+                        == 0
+                })
+                .collect::<Vec<_>>();
 
-                    let mut depths = stack
-                        .iter()
-                        .map(|node| (*node, 0))
-                        .collect::<HashMap<_, _>>();
+            let mut depths = stack
+                .iter()
+                .map(|node| (*node, 0))
+                .collect::<HashMap<_, _>>();
+            let mut max_depth = 0;
 
-                    while let Some(input) = stack.pop() {
-                        let input_depth = depths[input];
-                        for output in graph.neighbors_directed(input, petgraph::Direction::Outgoing)
-                        {
-                            let output_depth = depths.entry(output).or_insert(0);
-                            if *output_depth > input_depth {
-                                continue;
-                            }
-
-                            *output_depth = input_depth + 1;
-                            stack.push(output);
-                        }
+            while let Some(input) = stack.pop() {
+                let input_depth = depths[input];
+                for output in graph.neighbors_directed(input, petgraph::Direction::Outgoing) {
+                    let output_depth = depths.entry(output).or_insert(0);
+                    if *output_depth > input_depth {
+                        continue;
                     }
 
-                    let mut depths = depths.into_iter().collect::<Vec<_>>();
-                    depths.sort_by_key(|(_, depth)| *depth);
+                    *output_depth = input_depth + 1;
 
-                    Box::new(
-                        depths
-                            .into_iter()
-                            .filter(move |(name, _)| craftable.contains_key(name)),
-                    )
+                    stack.push(output);
+
+                    if *output_depth > max_depth && craftable.contains_key(output) {
+                        max_depth = *output_depth;
+                    }
                 }
+            }
+
+            let mut item_by_depth = vec![Vec::new(); max_depth + 1];
+            for (name, depth) in depths
+                .into_iter()
+                .filter(|(name, _)| craftable.contains_key(name))
+            {
+                item_by_depth[depth].push(name);
+            }
+            assert!(item_by_depth[0].is_empty(), "Can't craft depth 0 items");
+
+            let sections = match mode {
+                Mode::Time => item_by_depth
+                    .into_iter()
+                    .enumerate()
+                    .skip(1)
+                    .map(|(index, items)| {
+                        let mut filters = items
+                            .into_iter()
+                            .map(|name| LogisticFilter {
+                                index: NonZeroU16::MIN,
+                                name,
+                                count: craftable[name] as i32,
+                            })
+                            .collect::<Vec<_>>();
+
+                        filters.sort_unstable_by_key(|filter| filter.name);
+
+                        for (index, filter) in filters.iter_mut().enumerate() {
+                            filter.index = NonZeroU16::new((index + 1) as u16).unwrap();
+                        }
+
+                        LogisticSection {
+                            index: NonZeroU8::new(index as u8).unwrap(),
+                            multiplier: 1.0,
+                            filters,
+                        }
+                    })
+                    .collect(),
+                Mode::Priority => item_by_depth
+                    .into_iter()
+                    .enumerate()
+                    .skip(1)
+                    .map(|(index, items)| {
+                        let mut filters = items
+                            .into_iter()
+                            .map(|name| LogisticFilter {
+                                index: NonZeroU16::MIN,
+                                name,
+                                count: 1,
+                            })
+                            .collect::<Vec<_>>();
+
+                        filters.sort_unstable_by_key(|filter| filter.name);
+
+                        for (index, filter) in filters.iter_mut().enumerate() {
+                            filter.index = NonZeroU16::new((index + 1) as u16).unwrap();
+                        }
+
+                        LogisticSection {
+                            index: NonZeroU8::new(index as u8).unwrap(),
+                            multiplier: index as f32,
+                            filters,
+                        }
+                    })
+                    .collect(),
             };
 
             if blueprint {
-                let blueprint = BlueprintString::constant_combinator(
-                    String::from("Topological Sort"),
-                    signals.map(|(name, index)| (String::from(name), index)),
-                )
-                .encode();
+                let blueprint = BlueprintString::constant_combinator("", sections).encode();
                 std::io::stdout().lock().write_all(&blueprint).unwrap();
             } else {
-                signals.for_each(|(name, index)| println!("{name}: {index}"))
+                sections.iter().for_each(|section| {
+                    eprintln!("{}: {:.0}x", section.index, section.multiplier);
+                    section.filters.iter().for_each(|filter| {
+                        eprintln!("- {}: {} = {}", filter.index, filter.name, filter.count);
+                    })
+                })
             }
         }
     }
