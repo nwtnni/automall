@@ -237,9 +237,9 @@ fn main() {
                                 };
 
                                 LogisticFilter {
-                                    index: NonZeroU16::MIN,
                                     name,
                                     count: io as i32,
+                                    ..Default::default()
                                 }
                             })
                             .collect::<Vec<_>>();
@@ -265,9 +265,9 @@ fn main() {
                         let mut filters = items
                             .into_iter()
                             .map(|name| LogisticFilter {
-                                index: NonZeroU16::MIN,
                                 name,
                                 count: 1,
+                                ..Default::default()
                             })
                             .collect::<Vec<_>>();
 
@@ -287,7 +287,7 @@ fn main() {
             };
 
             if blueprint {
-                let blueprint = BlueprintString::constant_combinator("", sections).encode();
+                let blueprint = BlueprintString::constant_combinator(sections).encode();
                 std::io::stdout().lock().write_all(&blueprint).unwrap();
             } else {
                 sections.iter().for_each(|section| {

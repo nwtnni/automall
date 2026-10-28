@@ -14,10 +14,9 @@ pub struct BlueprintString<'a> {
 }
 
 impl<'a> BlueprintString<'a> {
-    pub fn constant_combinator(label: &'a str, sections: Vec<LogisticSection<'a>>) -> Self {
+    pub fn constant_combinator(sections: Vec<LogisticSection<'a>>) -> Self {
         Self {
             blueprint: Blueprint {
-                label,
                 entities: vec![Entity {
                     entity_number: 1,
                     name: "constant-combinator",
@@ -70,7 +69,6 @@ impl<'a> BlueprintString<'a> {
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(tag = "item", rename = "blueprint")]
 pub struct Blueprint<'a> {
-    label: &'a str,
     #[serde(borrow)]
     entities: Vec<Entity<'a>>,
     version: u64,
@@ -114,6 +112,20 @@ pub struct LogisticFilter<'a> {
     pub index: NonZeroU16,
     pub name: &'a str,
     pub count: i32,
+    pub quality: &'a str,
+    pub comparator: &'a str,
+}
+
+impl Default for LogisticFilter<'_> {
+    fn default() -> Self {
+        Self {
+            index: NonZeroU16::MIN,
+            name: "",
+            count: 0,
+            quality: "normal",
+            comparator: "=",
+        }
+    }
 }
 
 #[derive(Debug, Deserialize, Serialize)]
